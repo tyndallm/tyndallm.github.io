@@ -1,1 +1,3 @@
+echo 'detroitstartuphacker.com' >> source/CNAME
+# OR
 echo 'www.detroitstartuphacker.com' >> source/CNAME
