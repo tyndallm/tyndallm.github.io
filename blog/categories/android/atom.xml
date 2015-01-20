@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+
+  <title><![CDATA[Category: Android | Detroit startup hacker]]></title>
+  <link href="http://tyndallm.github.io/blog/categories/android/atom.xml" rel="self"/>
+  <link href="http://tyndallm.github.io/"/>
+  <updated>2015-01-20T07:50:16-05:00</updated>
+  <id>http://tyndallm.github.io/</id>
+  <author>
+    <name><![CDATA[Matt Tyndall]]></name>
+    
+  </author>
+  <generator uri="http://octopress.org/">Octopress</generator>
+
+  
+  <entry>
+    <title type="html"><![CDATA[Android Network Requests Made Easy]]></title>
+    <link href="http://tyndallm.github.io/blog/2015/01/20/android-network-requests-made-easy/"/>
+    <updated>2015-01-20T07:29:24-05:00</updated>
+    <id>http://tyndallm.github.io/blog/2015/01/20/android-network-requests-made-easy</id>
+    <content type="html"><![CDATA[<p><img src="https://silvrback.s3.amazonaws.com/uploads/9c861c79-bffc-4abd-ab32-0b9b696b76b5/android_network_request_header_large.png" alt="Silvrback blog image" /></p>
+
+<p>Making network requests in Android is one of the most common requirements for apps but often one of the most misunderstood.  There are many ways to accomplish  handling a network request but without a good understanding of whats going on the process can be overwhelming.  I wanted to write a guide that illustrates what I&rsquo;ve found to be the best ways to do this while avoiding a bunch of pitfalls.  Before we begin I want to take a second to break down the steps required, I will be going in depth about each step so don&rsquo;t worry if you don&rsquo;t know what they mean.</p>
+
+<ol>
+<li>Create an asynchronous code block in a background thread</li>
+<li>Initiate a network connection on this thread</li>
+<li>Receive data from connection</li>
+<li>Parse data into a useable format</li>
+<li>Update app based on data received</li>
+</ol>
+
+
+<p>First things first you have to tell your app that you are going to be using the internet by adding a Internet permission to the manifest</p>
+
+<pre><code>&lt;uses-permission android:name="android.permission.INTERNET" /&gt;
+</code></pre>
+
+<p>If you don&rsquo;t include this line you will get a silent exception and you will have to look through the logcat in order to realize the connection was refused due to insufficient permissions.</p>
+
+<h2>1. Create an asynchronous code block in a background thread</h2>
+
+<p>One of the hardest things for new Android developers to grasp is the idea of asynchronous code, if you are unfamiliar with this concept I will be writing up a quick post on the basics but for now you just need to understand that since networks requests can take an unknown amount of time to complete we need to make sure the app continues to be functional while the user is waiting for the results to return.</p>
+
+<p>Android provides the Async task for just this purpose.  The documentation definition states &ldquo;This class allows to perform background operations and publish results on the UI thread without having to manipulate threads and/or handlers&rdquo;(<a href="http://developer.android.com/reference/android/os/AsyncTask.html">http://developer.android.com/reference/android/os/AsyncTask.html</a>).  This is the easiest way to create a network request but should generally only be used for short operations(a few seconds at most).  Ideally the async task would be defined as a separate class or a private inner class but could also be defined inline.  There are four main methods that an asynctask provides us: onPreExecute(), doInBackground(), onProgressUpdate(), and onPostExecute().  For this example we will focus on doInBackground() and onPostExecute().  One of the nice things about the asynctask is that is bridges the gap between UI thread and the background network thread as the doInBackground() function executes on the background thread, while the callback function onPostExecute executes on the UI thread allowing us to easily update UI components with the resulting data.</p>
+
+<pre><code class="Java">private class LoadDataInBackground extends AsyncTask&lt;String, Void, JSONObject&gt; {
+
+    @Override
+    protected JSONObject doInBackground(String... params) {
+        /** Our networking logic will go here **/
+    }
+
+}
+</code></pre>
+
+<h2>2. Initiate a network connection on this thread</h2>
+
+<p>To initiate the network connection we will be writing our networking code in the doInBackground() function of our asynctask.  When it comes to the actual HTTP request there are two ways to connect: the Apache HttpClient, and the Android HttpURLConnection.  Originally HttpClient was the preferred method for connecting however, Android has deprecated the Apache HttpClient in favor of the HttpURLConnection since Gingerbread.  In order to make a connection we need to create a URLConnection from a URL which can take a URI or a even a String Url.  We then have to open that connection.  This first example will be a HTTP GET request.  We can explicitly state the http method by calling httpUrlConnection.setMethod(&ldquo;GET&rdquo;) although the default choice is always GET.  Once we have opened the connection we can then get an input stream from the connection.  This is how we will fetch the bytes streaming in through the network request.  When we are reading bytes from an InputStream we need to make system calls to decode what those bytes are, The BufferedInputStream essentially takes all of those calls and batches them up so that only one system call is required to decode the information.  Once we have a buferredInputStream we can then take a StringBuilder and append the received bytes as characters to our string builder object.  When there are no more characters to read our response String is complete.  Here I&rsquo;ve created a convenience method which will handle this whole operation and return our response as a JSONObject.  By returning a JSONObject the doInBackground method provides a lot more flexibility.</p>
+
+<p>TODO: Break up this class into code blocks, show full class at end or link to pastebin/github</p>
+
+<pre><code class="Java">public class NetworkRequest {
+
+    public NetworkRequest() {
+
+    }
+
+    private JSONObject getJSONObjectFromUrl(String url) throws IOException, JSONException {
+        URLConnection httpURLConnection = new URL(url).openConnection();
+
+        InputStream inputStream = httpURLConnection.getInputStream();
+        BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream);
+
+        int bytesRead;
+        StringBuilder stringBuilder = new StringBuilder();
+
+        while ((bytesRead = bufferedInputStream.read()) != -1) {
+            stringBuilder.append((char)bytesRead);
+        }
+
+        return new JSONObject(stringBuilder.toString());
+    }
+
+    private class LoadDataInBackground extends AsyncTask&lt;String, Void, JSONObject&gt; {
+        private DataReceivedCallback dataReceivedCallback;
+
+        private LoadDataInBackground(DataReceivedCallback dataReceivedCallback) {
+            this.dataReceivedCallback = dataReceivedCallback;
+        }
+
+        @Override
+        protected JSONObject doInBackground(String... params) {
+            try {
+                String url = params[0];
+                return getJSONObjectFromUrl(url);
+            } catch(IOException e) {
+                return null;
+            } catch (JSONException e) {
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(JSONObject result) {
+            if(result != null) {
+                this.dataReceivedCallback.onSuccess(result);
+            } else {
+                this.dataReceivedCallback.onError();
+            }
+        }
+    }
+}
+</code></pre>
+
+<h2>3. Retrieve data from connection and parse into a useable format</h2>
+
+<p>Once the Http request has completed, the JSONObject retrieved is returned in the doInBackground function which returns this data to the onPostExecute callback function.  Our onPostExecute function takes a single parameter which is a JSONObject.  If we have a Java model for the object we are retrieving this is the point you would want to take the JSONObject and convert it to the model which the rest of your app understands.  In this example I don&rsquo;t have a model but if you were using GSON or manually parsing the JSON into a model you could do that here.  You&rsquo;ll notice in the example above I have a conditional statement which checks to see if the JSONobject returned is null or not.  If there were any type of exception encountered in the doInBackground function the catch statements would have returned null and this is where the check would occur.</p>
+
+<h2>4. Update app based on data received</h2>
+
+<p>You will also notice that I&rsquo;m using an interface called dataReceivedCallback.  This interface has two function, onSuccess and onFailure.  If the data is returned is a valid JSONObject I will return the JSONObject through the onSuccess function which will return the data to the activity or fragment that implements the dataReceivedCallback.  If the data is null it will trigger the onError dataReceivedCallback function which would then be handled in the implementing class to probably show a message to the user saying there was some sort of problem.</p>
+
+<p>This takes care of the simplest case of making an Http GET request, but what if we need a POST?  We can use basically the same code with a few modifications.</p>
+
+<pre><code class="Java">private void sendPost(String url) throws IOException, JSONException {
+        URLConnection httpURLConnection = new URL(url).openConnection();
+        httpUrlConnection.setRequestMethod("POST");
+
+        InputStream inputStream = httpURLConnection.getInputStream();
+        BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream);
+
+        int bytesRead;
+        StringBuilder stringBuilder = new StringBuilder();
+
+        while ((bytesRead = bufferedInputStream.read()) != -1) {
+            stringBuilder.append((char)bytesRead);
+        }
+
+        return new JSONObject(stringBuilder.toString());
+    }
+</code></pre>
+
+<p>TODO: Add a more real world example, API class with multiple methods using actual API, Reddit perhaps?</p>
+]]></content>
+  </entry>
+  
+</feed>

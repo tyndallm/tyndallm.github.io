@@ -5,11 +5,11 @@
 <!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
 <head>
   <meta charset="utf-8">
-  <title>My Octopress Blog</title>
-  <meta name="author" content="Your Name">
+  <title>Detroit startup hacker</title>
+  <meta name="author" content="Matt Tyndall">
 
   
-  <meta name="description" content=" Blog Archives Recent Posts ">
+  <meta name="description" content="Making network requests in Android is one of the most common requirements for apps but often one of the most misunderstood. There are many ways to &hellip;">
   
 
   <!-- http://t.co/dKP3o1e -->
@@ -21,7 +21,7 @@
   <link rel="canonical" href="http://tyndallm.github.io/">
   <link href="/favicon.png" rel="icon">
   <link href="/stylesheets/screen.css" media="screen, projection" rel="stylesheet" type="text/css">
-  <link href="/atom.xml" rel="alternate" title="My Octopress Blog" type="application/atom+xml">
+  <link href="/atom.xml" rel="alternate" title="Detroit startup hacker" type="application/atom+xml">
   <script src="/javascripts/modernizr-2.0.js"></script>
   <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
   <script>!window.jQuery && document.write(unescape('%3Cscript src="/javascripts/libs/jquery.min.js"%3E%3C/script%3E'))</script>
@@ -36,7 +36,7 @@
 
 <body   >
   <header role="banner"><hgroup>
-  <h1><a href="/">My Octopress Blog</a></h1>
+  <h1><a href="/">Detroit startup hacker</a></h1>
   
     <h2>A blogging framework for hackers.</h2>
   
@@ -66,6 +66,237 @@
       <div class="blog-index">
   
   
+  
+    <article>
+      
+  <header>
+    
+      <h1 class="entry-title"><a href="/blog/2015/01/20/android-network-requests-made-easy/">Android Network Requests Made Easy</a></h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2015-01-20T07:29:24-05:00'><span class='date'><span class='date-month'>Jan</span> <span class='date-day'>20</span><span class='date-suffix'>th</span>, <span class='date-year'>2015</span></span> <span class='time'>7:29 am</span></time>
+        
+      </p>
+    
+  </header>
+
+
+  <div class="entry-content"><p><img src="https://silvrback.s3.amazonaws.com/uploads/9c861c79-bffc-4abd-ab32-0b9b696b76b5/android_network_request_header_large.png" alt="Silvrback blog image" /></p>
+
+<p>Making network requests in Android is one of the most common requirements for apps but often one of the most misunderstood.  There are many ways to accomplish  handling a network request but without a good understanding of whats going on the process can be overwhelming.  I wanted to write a guide that illustrates what I&rsquo;ve found to be the best ways to do this while avoiding a bunch of pitfalls.  Before we begin I want to take a second to break down the steps required, I will be going in depth about each step so don&rsquo;t worry if you don&rsquo;t know what they mean.</p>
+
+<ol>
+<li>Create an asynchronous code block in a background thread</li>
+<li>Initiate a network connection on this thread</li>
+<li>Receive data from connection</li>
+<li>Parse data into a useable format</li>
+<li>Update app based on data received</li>
+</ol>
+
+
+<p>First things first you have to tell your app that you are going to be using the internet by adding a Internet permission to the manifest</p>
+
+<figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>&lt;uses-permission android:name="android.permission.INTERNET" /&gt;</span></code></pre></td></tr></table></div></figure>
+
+
+<p>If you don&rsquo;t include this line you will get a silent exception and you will have to look through the logcat in order to realize the connection was refused due to insufficient permissions.</p>
+
+<h2>1. Create an asynchronous code block in a background thread</h2>
+
+<p>One of the hardest things for new Android developers to grasp is the idea of asynchronous code, if you are unfamiliar with this concept I will be writing up a quick post on the basics but for now you just need to understand that since networks requests can take an unknown amount of time to complete we need to make sure the app continues to be functional while the user is waiting for the results to return.</p>
+
+<p>Android provides the Async task for just this purpose.  The documentation definition states &ldquo;This class allows to perform background operations and publish results on the UI thread without having to manipulate threads and/or handlers&rdquo;(<a href="http://developer.android.com/reference/android/os/AsyncTask.html">http://developer.android.com/reference/android/os/AsyncTask.html</a>).  This is the easiest way to create a network request but should generally only be used for short operations(a few seconds at most).  Ideally the async task would be defined as a separate class or a private inner class but could also be defined inline.  There are four main methods that an asynctask provides us: onPreExecute(), doInBackground(), onProgressUpdate(), and onPostExecute().  For this example we will focus on doInBackground() and onPostExecute().  One of the nice things about the asynctask is that is bridges the gap between UI thread and the background network thread as the doInBackground() function executes on the background thread, while the callback function onPostExecute executes on the UI thread allowing us to easily update UI components with the resulting data.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='Java'><span class='line'><span class="kd">private</span> <span class="kd">class</span> <span class="nc">LoadDataInBackground</span> <span class="kd">extends</span> <span class="n">AsyncTask</span><span class="o">&lt;</span><span class="n">String</span><span class="o">,</span> <span class="n">Void</span><span class="o">,</span> <span class="n">JSONObject</span><span class="o">&gt;</span> <span class="o">{</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nd">@Override</span>
+</span><span class='line'>  <span class="kd">protected</span> <span class="n">JSONObject</span> <span class="nf">doInBackground</span><span class="o">(</span><span class="n">String</span><span class="o">...</span> <span class="n">params</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>      <span class="cm">/** Our networking logic will go here **/</span>
+</span><span class='line'>  <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>2. Initiate a network connection on this thread</h2>
+
+<p>To initiate the network connection we will be writing our networking code in the doInBackground() function of our asynctask.  When it comes to the actual HTTP request there are two ways to connect: the Apache HttpClient, and the Android HttpURLConnection.  Originally HttpClient was the preferred method for connecting however, Android has deprecated the Apache HttpClient in favor of the HttpURLConnection since Gingerbread.  In order to make a connection we need to create a URLConnection from a URL which can take a URI or a even a String Url.  We then have to open that connection.  This first example will be a HTTP GET request.  We can explicitly state the http method by calling httpUrlConnection.setMethod(&ldquo;GET&rdquo;) although the default choice is always GET.  Once we have opened the connection we can then get an input stream from the connection.  This is how we will fetch the bytes streaming in through the network request.  When we are reading bytes from an InputStream we need to make system calls to decode what those bytes are, The BufferedInputStream essentially takes all of those calls and batches them up so that only one system call is required to decode the information.  Once we have a buferredInputStream we can then take a StringBuilder and append the received bytes as characters to our string builder object.  When there are no more characters to read our response String is complete.  Here I&rsquo;ve created a convenience method which will handle this whole operation and return our response as a JSONObject.  By returning a JSONObject the doInBackground method provides a lot more flexibility.</p>
+
+<p>TODO: Break up this class into code blocks, show full class at end or link to pastebin/github</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+</pre></td><td class='code'><pre><code class='Java'><span class='line'><span class="kd">public</span> <span class="kd">class</span> <span class="nc">NetworkRequest</span> <span class="o">{</span>
+</span><span class='line'>  
+</span><span class='line'>  <span class="kd">public</span> <span class="nf">NetworkRequest</span><span class="o">()</span> <span class="o">{</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="kd">private</span> <span class="n">JSONObject</span> <span class="nf">getJSONObjectFromUrl</span><span class="o">(</span><span class="n">String</span> <span class="n">url</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span><span class="o">,</span> <span class="n">JSONException</span> <span class="o">{</span>
+</span><span class='line'>      <span class="n">URLConnection</span> <span class="n">httpURLConnection</span> <span class="o">=</span> <span class="k">new</span> <span class="nf">URL</span><span class="o">(</span><span class="n">url</span><span class="o">).</span><span class="na">openConnection</span><span class="o">();</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="n">InputStream</span> <span class="n">inputStream</span> <span class="o">=</span> <span class="n">httpURLConnection</span><span class="o">.</span><span class="na">getInputStream</span><span class="o">();</span>
+</span><span class='line'>      <span class="n">BufferedInputStream</span> <span class="n">bufferedInputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="nf">BufferedInputStream</span><span class="o">(</span><span class="n">inputStream</span><span class="o">);</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="kt">int</span> <span class="n">bytesRead</span><span class="o">;</span>
+</span><span class='line'>      <span class="n">StringBuilder</span> <span class="n">stringBuilder</span> <span class="o">=</span> <span class="k">new</span> <span class="nf">StringBuilder</span><span class="o">();</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="k">while</span> <span class="o">((</span><span class="n">bytesRead</span> <span class="o">=</span> <span class="n">bufferedInputStream</span><span class="o">.</span><span class="na">read</span><span class="o">())</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>          <span class="n">stringBuilder</span><span class="o">.</span><span class="na">append</span><span class="o">((</span><span class="kt">char</span><span class="o">)</span><span class="n">bytesRead</span><span class="o">);</span>
+</span><span class='line'>      <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="k">return</span> <span class="k">new</span> <span class="nf">JSONObject</span><span class="o">(</span><span class="n">stringBuilder</span><span class="o">.</span><span class="na">toString</span><span class="o">());</span>
+</span><span class='line'>  <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="kd">private</span> <span class="kd">class</span> <span class="nc">LoadDataInBackground</span> <span class="kd">extends</span> <span class="n">AsyncTask</span><span class="o">&lt;</span><span class="n">String</span><span class="o">,</span> <span class="n">Void</span><span class="o">,</span> <span class="n">JSONObject</span><span class="o">&gt;</span> <span class="o">{</span>
+</span><span class='line'>      <span class="kd">private</span> <span class="n">DataReceivedCallback</span> <span class="n">dataReceivedCallback</span><span class="o">;</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="kd">private</span> <span class="nf">LoadDataInBackground</span><span class="o">(</span><span class="n">DataReceivedCallback</span> <span class="n">dataReceivedCallback</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>          <span class="k">this</span><span class="o">.</span><span class="na">dataReceivedCallback</span> <span class="o">=</span> <span class="n">dataReceivedCallback</span><span class="o">;</span>
+</span><span class='line'>      <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="nd">@Override</span>
+</span><span class='line'>      <span class="kd">protected</span> <span class="n">JSONObject</span> <span class="nf">doInBackground</span><span class="o">(</span><span class="n">String</span><span class="o">...</span> <span class="n">params</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>          <span class="k">try</span> <span class="o">{</span>
+</span><span class='line'>              <span class="n">String</span> <span class="n">url</span> <span class="o">=</span> <span class="n">params</span><span class="o">[</span><span class="mi">0</span><span class="o">];</span>
+</span><span class='line'>              <span class="k">return</span> <span class="nf">getJSONObjectFromUrl</span><span class="o">(</span><span class="n">url</span><span class="o">);</span>
+</span><span class='line'>          <span class="o">}</span> <span class="k">catch</span><span class="o">(</span><span class="n">IOException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>              <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+</span><span class='line'>          <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="n">JSONException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>              <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+</span><span class='line'>          <span class="o">}</span>
+</span><span class='line'>      <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="nd">@Override</span>
+</span><span class='line'>      <span class="kd">protected</span> <span class="kt">void</span> <span class="nf">onPostExecute</span><span class="o">(</span><span class="n">JSONObject</span> <span class="n">result</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>          <span class="k">if</span><span class="o">(</span><span class="n">result</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>              <span class="k">this</span><span class="o">.</span><span class="na">dataReceivedCallback</span><span class="o">.</span><span class="na">onSuccess</span><span class="o">(</span><span class="n">result</span><span class="o">);</span>
+</span><span class='line'>          <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+</span><span class='line'>              <span class="k">this</span><span class="o">.</span><span class="na">dataReceivedCallback</span><span class="o">.</span><span class="na">onError</span><span class="o">();</span>
+</span><span class='line'>          <span class="o">}</span>
+</span><span class='line'>      <span class="o">}</span>
+</span><span class='line'>  <span class="o">}</span>
+</span><span class='line'><span class="o">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>3. Retrieve data from connection and parse into a useable format</h2>
+
+<p>Once the Http request has completed, the JSONObject retrieved is returned in the doInBackground function which returns this data to the onPostExecute callback function.  Our onPostExecute function takes a single parameter which is a JSONObject.  If we have a Java model for the object we are retrieving this is the point you would want to take the JSONObject and convert it to the model which the rest of your app understands.  In this example I don&rsquo;t have a model but if you were using GSON or manually parsing the JSON into a model you could do that here.  You&rsquo;ll notice in the example above I have a conditional statement which checks to see if the JSONobject returned is null or not.  If there were any type of exception encountered in the doInBackground function the catch statements would have returned null and this is where the check would occur.</p>
+
+<h2>4. Update app based on data received</h2>
+
+<p>You will also notice that I&rsquo;m using an interface called dataReceivedCallback.  This interface has two function, onSuccess and onFailure.  If the data is returned is a valid JSONObject I will return the JSONObject through the onSuccess function which will return the data to the activity or fragment that implements the dataReceivedCallback.  If the data is null it will trigger the onError dataReceivedCallback function which would then be handled in the implementing class to probably show a message to the user saying there was some sort of problem.</p>
+
+<p>This takes care of the simplest case of making an Http GET request, but what if we need a POST?  We can use basically the same code with a few modifications.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+</pre></td><td class='code'><pre><code class='Java'><span class='line'><span class="kd">private</span> <span class="kt">void</span> <span class="nf">sendPost</span><span class="o">(</span><span class="n">String</span> <span class="n">url</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span><span class="o">,</span> <span class="n">JSONException</span> <span class="o">{</span>
+</span><span class='line'>      <span class="n">URLConnection</span> <span class="n">httpURLConnection</span> <span class="o">=</span> <span class="k">new</span> <span class="nf">URL</span><span class="o">(</span><span class="n">url</span><span class="o">).</span><span class="na">openConnection</span><span class="o">();</span>
+</span><span class='line'>      <span class="n">httpUrlConnection</span><span class="o">.</span><span class="na">setRequestMethod</span><span class="o">(</span><span class="s">&quot;POST&quot;</span><span class="o">);</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="n">InputStream</span> <span class="n">inputStream</span> <span class="o">=</span> <span class="n">httpURLConnection</span><span class="o">.</span><span class="na">getInputStream</span><span class="o">();</span>
+</span><span class='line'>      <span class="n">BufferedInputStream</span> <span class="n">bufferedInputStream</span> <span class="o">=</span> <span class="k">new</span> <span class="nf">BufferedInputStream</span><span class="o">(</span><span class="n">inputStream</span><span class="o">);</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="kt">int</span> <span class="n">bytesRead</span><span class="o">;</span>
+</span><span class='line'>      <span class="n">StringBuilder</span> <span class="n">stringBuilder</span> <span class="o">=</span> <span class="k">new</span> <span class="nf">StringBuilder</span><span class="o">();</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="k">while</span> <span class="o">((</span><span class="n">bytesRead</span> <span class="o">=</span> <span class="n">bufferedInputStream</span><span class="o">.</span><span class="na">read</span><span class="o">())</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="o">)</span> <span class="o">{</span>
+</span><span class='line'>          <span class="n">stringBuilder</span><span class="o">.</span><span class="na">append</span><span class="o">((</span><span class="kt">char</span><span class="o">)</span><span class="n">bytesRead</span><span class="o">);</span>
+</span><span class='line'>      <span class="o">}</span>
+</span><span class='line'>
+</span><span class='line'>      <span class="k">return</span> <span class="k">new</span> <span class="nf">JSONObject</span><span class="o">(</span><span class="n">stringBuilder</span><span class="o">.</span><span class="na">toString</span><span class="o">());</span>
+</span><span class='line'>  <span class="o">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>TODO: Add a more real world example, API class with multiple methods using actual API, Reddit perhaps?</p>
+</div>
+  
+  
+
+
+    </article>
+  
   <div class="pagination">
     
     <a href="/blog/archives">Blog Archives</a>
@@ -77,6 +308,10 @@
     <section>
   <h1>Recent Posts</h1>
   <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/blog/2015/01/20/android-network-requests-made-easy/">Android Network Requests Made Easy</a>
+      </li>
     
   </ul>
 </section>
@@ -91,7 +326,7 @@
     </div>
   </div>
   <footer role="contentinfo"><p>
-  Copyright &copy; 2015 - Your Name -
+  Copyright &copy; 2015 - Matt Tyndall -
   <span class="credit">Powered by <a href="http://octopress.org">Octopress</a></span>
 </p>
 
